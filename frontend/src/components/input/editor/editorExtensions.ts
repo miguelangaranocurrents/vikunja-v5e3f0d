@@ -68,6 +68,46 @@ function parseAttachmentUrl(url: unknown): AttachmentRef | null {
 	}
 }
 
+// Plain-text clipboard serialization that keeps list markers.
+function serializeSliceAsText(fragment: Fragment, indent = ''): string {
+	const blocks: string[] = []
+
+	fragment.forEach(node => {
+		const name = node.type.name
+		if (name === 'bulletList' || name === 'orderedList' || name === 'taskList') {
+			const lines: string[] = []
+			let n = Number(node.attrs.start ?? 1)
+			node.forEach(item => {
+				const marker = name === 'bulletList'
+					? '-'
+					: name === 'orderedList'
+						? `${n++}.`
+						: (item.attrs.checked ? '- [x]' : '- [ ]')
+				const parts: string[] = []
+				item.forEach(child => {
+					if (child.isTextblock) {
+						parts.push(child.textBetween(0, child.content.size, '\n', '\n'))
+					} else {
+						parts.push(serializeSliceAsText(Fragment.from(child), indent + '  '))
+					}
+				})
+				const [first = '', ...rest] = parts
+				lines.push(`${indent}${marker} ${first}`)
+				rest.forEach(r => lines.push(r))
+			})
+			blocks.push(lines.join('\n'))
+		} else if (node.isTextblock) {
+			blocks.push(indent + node.textBetween(0, node.content.size, '\n', '\n'))
+		} else if (node.isLeaf) {
+			blocks.push(node.textContent)
+		} else {
+			blocks.push(serializeSliceAsText(node.content, indent))
+		}
+	})
+
+	return blocks.join('\n\n')
+}
+
 export interface EditorExtensionDeps {
 	t: (key: string) => string
 	isEditing: Ref<boolean>
@@ -233,6 +273,7 @@ export function createEditorExtensions(deps: EditorExtensionDeps): Extensions {
 					props: {
 						clipboardParser: createClipboardParser(this.editor.schema),
 						transformPasted: slice => repairSliceContent(slice),
+						clipboardTextSerializer: slice => serializeSliceAsText(slice.content),
 
 						handlePaste: (view, event) => {
 
